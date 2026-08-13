@@ -20,6 +20,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -84,7 +85,7 @@ public class AemetClientAdapter implements ForecastProvider, MunicipalityProvide
             var aemetCode = numericMunicipalityCode(municipalityCode);
             var response = request("/api/prediccion/especifica/municipio/diaria/" + aemetCode);
             var dataUrl = dataUrl(response, "forecast");
-            var forecastRoot = readJson(dataUrl);
+            var forecastRoot = readJson(dataUrl, this::decodeBodyUtf8);
             var city = forecastRoot.isArray() ? forecastRoot.get(0) : forecastRoot;
             var day = findDay(city.path("prediccion").path("dia"), date);
             var temperature = day.path("temperatura");
@@ -142,10 +143,10 @@ public class AemetClientAdapter implements ForecastProvider, MunicipalityProvide
 
     private JsonNode resolveDataUrl(AemetApiResponse response) throws Exception {
         var dataUrl = dataUrl(response, "municipality catalogue");
-        return readJson(dataUrl);
+        return readJson(dataUrl, this::decodeBodyIso);
     }
 
-    private JsonNode readJson(String url) throws Exception {
+    private JsonNode readJson(String url, Function<byte[], String> decoder) throws Exception {
         try {
             var dataUri = URI.create(url);
             if (!"https".equalsIgnoreCase(dataUri.getScheme())
@@ -155,9 +156,9 @@ public class AemetClientAdapter implements ForecastProvider, MunicipalityProvide
             }
             var body = client.get().uri(dataUri)
                     .accept(MediaType.APPLICATION_JSON)
-                    .header("Accept-Charset", StandardCharsets.UTF_8.name())
                     .retrieve().body(byte[].class);
-            return mapper.readTree(decodeBody(body));
+
+            return mapper.readTree(decoder.apply(body));
         } catch (HttpServerErrorException error) {
             throw classifyServerError(error);
         } catch (HttpClientErrorException.TooManyRequests error) {
@@ -165,7 +166,11 @@ public class AemetClientAdapter implements ForecastProvider, MunicipalityProvide
         }
     }
 
-    private String decodeBody(byte[] body) {
+    private String decodeBodyIso(byte[] body) {
+        return new String(body, StandardCharsets.ISO_8859_1);
+    }
+
+    private String decodeBodyUtf8(byte[] body) {
         return new String(body, StandardCharsets.UTF_8);
     }
 
